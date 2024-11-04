@@ -9,6 +9,11 @@ from io import BytesIO
 import base64
 from typing import Optional
 from fastapi.middleware.cors import CORSMiddleware
+
+# Set up logging first
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 # Add numpy import and check
 try:
     import numpy as np
@@ -17,10 +22,6 @@ try:
 except ImportError as e:
     logger.error(f"Numpy import error: {e}")
     raise ImportError("Numpy is required but not installed. Please install it with 'pip install numpy'")
-
-# Set up logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Text to Image API")
 
