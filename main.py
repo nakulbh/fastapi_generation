@@ -34,20 +34,28 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize Stable Diffusion pipeline
+# Initialize Stable Diffusion pipeline with optimizations
 try:
     model_id = "runwayml/stable-diffusion-v1-5"
     logger.info(f"CUDA available: {torch.cuda.is_available()}")
     logger.info(f"Torch version: {torch.__version__}")
-    pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=torch.float32)
+    
+    pipe = StableDiffusionPipeline.from_pretrained(
+        model_id,
+        torch_dtype=torch.float32,
+        safety_checker=None  # Disable safety checker for speed
+    )
     pipe = pipe.to("cpu")
-    # Test numpy compatibility
-    test_array = np.zeros((1, 1))
-    logger.info("Numpy test array created successfully")
-    logger.info("Stable Diffusion pipeline initialized successfully.")
+    
+    # Enable memory efficient attention
+    pipe.enable_attention_slicing(slice_size="auto")
+    
+    # Optional: Enable VAE slicing for memory efficiency
+    pipe.enable_vae_slicing()
+    
+    logger.info("Stable Diffusion pipeline initialized with optimizations")
 except Exception as e:
     logger.error(f"Failed to initialize Stable Diffusion pipeline: {str(e)}")
-    logger.error(f"Error type: {type(e).__name__}")
     raise HTTPException(status_code=500, detail=f"Error initializing Stable Diffusion pipeline: {str(e)}")
 
 class GenerationRequest(BaseModel):
@@ -68,6 +76,16 @@ async def generate_image(request: GenerationRequest):
     logger.info("Received image generation request.")
     logger.debug(f"Request parameters: {request}")
 
+    # Reduce default parameters for faster generation
+    if request.num_inference_steps > 30:
+        logger.warning("Reducing inference steps for performance")
+        request.num_inference_steps = 30
+    
+    if request.width > 512 or request.height > 512:
+        logger.warning("Reducing image dimensions for performance")
+        request.width = min(request.width, 512)
+        request.height = min(request.height, 512)
+    
     try:
         # More detailed numpy verification
         try:
