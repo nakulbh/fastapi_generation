@@ -159,45 +159,8 @@ class GenerationRequest(BaseModel):
 @app.post("/generate")
 async def generate_image(request: GenerationRequest):
     logger.info("Received image generation request.")
-    logger.debug(f"Request parameters: {request}")
-
-    # More aggressive parameter limits
-    request.num_inference_steps = min(request.num_inference_steps or 20, 20)  # Max 20 steps
-    request.width = min(request.width or 384, 384)  # Max 384x384
-    request.height = min(request.height or 384, 384)
-    request.guidance_scale = min(request.guidance_scale or 7.0, 7.0)  # Lower guidance scale
-    
-    logger.info(f"Adjusted parameters: steps={request.num_inference_steps}, size={request.width}x{request.height}")
-
-    # Reduce default parameters for faster generation
-    if request.num_inference_steps > 30:
-        logger.warning("Reducing inference steps for performance")
-        request.num_inference_steps = 30
-    
-    if request.width > 512 or request.height > 512:
-        logger.warning("Reducing image dimensions for performance")
-        request.width = min(request.width, 512)
-        request.height = min(request.height, 512)
     
     try:
-        # More detailed numpy verification
-        try:
-            test_array = np.zeros((1, 1))
-            logger.info("Numpy verification successful")
-        except Exception as e:
-            logger.error(f"Numpy verification failed: {str(e)}")
-            raise RuntimeError(f"Numpy verification failed: {str(e)}")
-            
-        # Set up generator with the provided seed, if available
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        if request.seed is not None:
-            generator = torch.Generator(device=device)
-            generator.manual_seed(request.seed)
-            logger.info(f"Using specified seed: {request.seed}")
-        else:
-            generator = None
-            logger.info("No seed provided; using default random seed.")
-
         # Generate image with Stable Diffusion pipeline
         image = pipe(
             prompt=request.prompt,
@@ -206,57 +169,29 @@ async def generate_image(request: GenerationRequest):
             guidance_scale=request.guidance_scale,
             width=request.width,
             height=request.height,
-            generator=generator
         ).images[0]
 
-        # Create a unique temporary directory for this request
-        temp_dir = tempfile.mkdtemp()
-        try:
-            # Generate unique filename
-            filename = f"generated_image_{uuid.uuid4()}.png"
-            temp_file_path = os.path.join(temp_dir, filename)
-            
-            # Save the generated image
-            image.save(temp_file_path, format="PNG")
-            logger.info(f"Image saved to temporary file: {temp_file_path}")
+        # Save image to temporary file
+        temp_file = f"/tmp/generated_image_{uuid.uuid4()}.png"
+        image.save(temp_file, format="PNG")
+        logger.info(f"Image saved to: {temp_file}")
 
-            # Determine the seed used for generation
-            used_seed = generator.initial_seed() if generator else torch.seed()
-            logger.info(f"Seed used for image generation: {used_seed}")
+        # Return file and delete it after sending
+        return FileResponse(
+            path=temp_file,
+            media_type="image/png",
+            filename="generated_image.png",
+            background=lambda: os.remove(temp_file)
+        )
 
-            # Return the file response
-            return FileResponse(
-                temp_file_path,
-                media_type="image/png",
-                filename=filename,
-                background=lambda: cleanup_files(temp_dir)  # Clean up after sending
-            )
-
-        except Exception as e:
-            # Clean up if something goes wrong
-            shutil.rmtree(temp_dir, ignore_errors=True)
-            raise e
-
-    except ValueError as e:
-        logger.error(f"ValueError during image generation: {e}")
-        raise HTTPException(status_code=400, detail=f"Invalid input parameters: {str(e)}")
-    except RuntimeError as e:
-        logger.error(f"RuntimeError during image generation: {e}")
-        raise HTTPException(status_code=500, detail="Error in model computation; check model configuration and resources.")
     except Exception as e:
-        logger.error(f"Unexpected error: {e}")
-        raise HTTPException(status_code=500, detail="An unexpected error occurred during image generation.")
+        # Clean up file if it exists and there was an error
+        if 'temp_file' in locals():
+            os.remove(temp_file)
+        logger.error(f"Error during image generation: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/health")
 async def health_check():
     logger.info("Health check requested.")
     return {"status": "healthy"}
-
-# Add this helper function
-def cleanup_files(temp_dir: str):
-    """Clean up temporary directory and its contents."""
-    try:
-        shutil.rmtree(temp_dir, ignore_errors=True)
-        logger.info(f"Cleaned up temporary directory: {temp_dir}")
-    except Exception as e:
-        logger.error(f"Error cleaning up temporary directory: {e}")
