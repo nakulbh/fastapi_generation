@@ -12,6 +12,8 @@ from fastapi.middleware.cors import CORSMiddleware
 import shutil
 import psutil
 from pathlib import Path
+import subprocess
+import time
 
 # Set up logging first
 logging.basicConfig(level=logging.INFO)
@@ -50,41 +52,92 @@ def cleanup_cache():
         shutil.rmtree(cache_dir, ignore_errors=True)
     logger.info("Cleaned up HuggingFace cache directory")
 
-# Before initializing the pipeline, check and prepare space
+def get_disk_usage():
+    """Get disk usage information."""
+    try:
+        df = subprocess.check_output(['df', '-h']).decode('utf-8')
+        logger.info(f"Disk usage:\n{df}")
+    except Exception as e:
+        logger.error(f"Failed to get disk usage: {e}")
+
+def aggressive_cleanup():
+    """Aggressively clean up disk space."""
+    directories_to_clean = [
+        Path.home() / ".cache" / "huggingface",
+        Path("/tmp/huggingface_cache"),
+        Path("/tmp/huggingface_home"),
+        Path("/tmp"),
+        Path.home() / ".cache"
+    ]
+    
+    for directory in directories_to_clean:
+        if directory.exists():
+            logger.info(f"Cleaning up directory: {directory}")
+            try:
+                if directory == Path("/tmp"):
+                    # Only remove files older than 1 hour in /tmp
+                    for item in directory.glob("*"):
+                        if item.stat().st_mtime < time.time() - 3600:
+                            try:
+                                if item.is_file():
+                                    item.unlink()
+                                elif item.is_dir():
+                                    shutil.rmtree(item)
+                            except Exception as e:
+                                logger.error(f"Failed to remove {item}: {e}")
+                else:
+                    shutil.rmtree(directory, ignore_errors=True)
+                logger.info(f"Cleaned up {directory}")
+            except Exception as e:
+                logger.error(f"Failed to clean {directory}: {e}")
+
+# Before initializing the pipeline, perform cleanup and checks
 try:
-    # Set custom cache directory in /tmp or another location with more space
-    cache_dir = "/tmp/huggingface_cache"
-    os.makedirs(cache_dir, exist_ok=True)
+    # Log initial disk space
+    get_disk_usage()
+    logger.info("Starting aggressive cleanup")
+    aggressive_cleanup()
+    get_disk_usage()  # Log disk space after cleanup
     
-    # Clean up existing cache if space is low
-    if get_free_space_gb(cache_dir) < 10:  # If less than 10GB free
-        cleanup_cache()
-        logger.info("Cleaned up cache due to low disk space")
+    # Set environment variables for cache location
+    os.environ["TRANSFORMERS_CACHE"] = "/tmp/huggingface_cache"
+    os.environ["HF_HOME"] = "/tmp/huggingface_home"
     
-    # Initialize pipeline with custom cache directory
+    # Create cache directories
+    cache_dir = Path("/tmp/huggingface_cache")
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Check available space
+    free_space = get_free_space_gb("/tmp")
+    logger.info(f"Available space in /tmp: {free_space:.2f} GB")
+    
+    if free_space < 5:  # Need at least 5GB
+        raise RuntimeError(f"Insufficient disk space. Only {free_space:.2f} GB available")
+    
+    # Initialize pipeline with minimal footprint
     model_id = "CompVis/stable-diffusion-v1-4"
-    logger.info(f"CUDA available: {torch.cuda.is_available()}")
-    logger.info(f"Torch version: {torch.__version__}")
-    
     pipe = StableDiffusionPipeline.from_pretrained(
         model_id,
         torch_dtype=torch.float16,
         safety_checker=None,
         requires_safety_checker=False,
-        cache_dir=cache_dir,  # Use custom cache directory
-        local_files_only=False  # Allow downloading if not in cache
+        cache_dir=str(cache_dir),
+        local_files_only=False,
+        low_cpu_mem_usage=True
     )
     pipe = pipe.to("cpu")
-    
-    # Enable optimizations
     pipe.enable_attention_slicing(slice_size=1)
     pipe.enable_vae_slicing()
-    pipe.enable_model_cpu_offload()
     
-    logger.info("Stable Diffusion pipeline initialized with optimizations")
+    logger.info("Pipeline initialized successfully")
+    
 except Exception as e:
-    logger.error(f"Failed to initialize Stable Diffusion pipeline: {str(e)}")
-    raise HTTPException(status_code=500, detail=f"Error initializing Stable Diffusion pipeline: {str(e)}")
+    logger.error(f"Failed to initialize pipeline: {e}")
+    get_disk_usage()  # Log final disk space state
+    raise HTTPException(
+        status_code=500,
+        detail=f"Failed to initialize pipeline due to disk space issues. Please contact administrator."
+    )
 
 class GenerationRequest(BaseModel):
     prompt: str
