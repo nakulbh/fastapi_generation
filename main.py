@@ -5,7 +5,7 @@ import torch
 from io import BytesIO
 import base64
 import os
-import tempfile
+from datetime import datetime
 from typing import Optional
 from fastapi.middleware.cors import CORSMiddleware
 import logging
@@ -54,6 +54,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Add this near the top of the file, after imports
+OUTPUT_DIR = "generated_images"
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 @contextmanager
 def handle_temporary_file():
@@ -138,20 +142,23 @@ async def generate_image(request: GenerationRequest):
         except Exception as e:
             raise ImageGenerationError(f"Image generation failed: {str(e)}")
 
-        # Save and encode image
-        with handle_temporary_file() as temp_file:
-            try:
-                # Save image to temporary file
-                image.save(temp_file.name, format="PNG")
-                
-                # Read and encode to base64
-                with open(temp_file.name, "rb") as f:
-                    img_str = base64.b64encode(f.read()).decode()
-            except Exception as e:
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Error processing generated image: {str(e)}"
-                )
+        # Save image to local folder
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"image_{timestamp}_{seed}.png"
+        filepath = os.path.join(OUTPUT_DIR, filename)
+        
+        try:
+            # Save image to file
+            image.save(filepath, format="PNG")
+            
+            # Read and encode to base64 for response
+            with open(filepath, "rb") as f:
+                img_str = base64.b64encode(f.read()).decode()
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error saving generated image: {str(e)}"
+            )
 
         generation_time = time.time() - start_time
         
