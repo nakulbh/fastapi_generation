@@ -9,6 +9,11 @@ from io import BytesIO
 import base64
 from typing import Optional
 from fastapi.middleware.cors import CORSMiddleware
+# Add numpy import and check
+try:
+    import numpy as np
+except ImportError:
+    raise ImportError("Numpy is required but not installed. Please install it with 'pip install numpy'")
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -54,6 +59,10 @@ async def generate_image(request: GenerationRequest):
     logger.debug(f"Request parameters: {request}")
 
     try:
+        # Verify numpy is working
+        if not np.__version__:
+            raise RuntimeError("Numpy is installed but not functioning properly")
+            
         # Set up generator with the provided seed, if available
         device = "cuda" if torch.cuda.is_available() else "cpu"
         if request.seed is not None:
