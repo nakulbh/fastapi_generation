@@ -1,4 +1,6 @@
 import logging
+import os
+import tempfile
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from diffusers import StableDiffusionPipeline
@@ -44,7 +46,7 @@ class GenerationRequest(BaseModel):
 
 class GenerationResponse(BaseModel):
     image: str  # Base64 encoded image
-    seed: int    # Seed used for generation
+    image_path: str  # Local path where image is saved
 
 @app.post("/generate", response_model=GenerationResponse)
 async def generate_image(request: GenerationRequest):
@@ -73,21 +75,25 @@ async def generate_image(request: GenerationRequest):
             generator=generator
         ).images[0]
 
-        # Convert PIL Image to base64 string
-        buffered = BytesIO()
-        image.save(buffered, format="PNG")
-        img_str = base64.b64encode(buffered.getvalue()).decode()
-        logger.info("Image generated successfully.")
+        # Save the generated image to a temporary file
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_file_path = os.path.join(temp_dir, "generated_image.png")
+            image.save(temp_file_path, format="PNG")
+            logger.info(f"Image saved to temporary file: {temp_file_path}")
 
-        # Determine and log the seed used for generation
-        used_seed = generator.initial_seed() if generator else torch.seed()
-        logger.info(f"Seed used for image generation: {used_seed}")
+            # Convert PIL Image to base64 string
+            with open(temp_file_path, "rb") as f:
+                img_str = base64.b64encode(f.read()).decode()
 
-        return GenerationResponse(
-            image=img_str,
-            seed=used_seed
-        )
-        
+            # Determine and log the seed used for generation
+            used_seed = generator.initial_seed() if generator else torch.seed()
+            logger.info(f"Seed used for image generation: {used_seed}")
+
+            return GenerationResponse(
+                image=img_str,
+                image_path=temp_file_path
+            )
+
     except ValueError as e:
         logger.error(f"ValueError during image generation: {e}")
         raise HTTPException(status_code=400, detail=f"Invalid input parameters: {str(e)}")

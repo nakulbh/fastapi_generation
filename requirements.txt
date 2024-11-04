@@ -2,14 +2,13 @@ fastapi==0.109.1
 uvicorn==0.27.0
 gunicorn==21.2.0
 --extra-index-url https://download.pytorch.org/whl/cpu
-torch==2.1.0  # Ensure the installation without '+cpu' suffix
+torch==2.1.0
 transformers==4.36.0
 diffusers==0.21.4
 huggingface-hub==0.19.4
 pydantic==2.6.0
 python-multipart==0.0.9
-pillow==10.0.0
+pillow==9.5.0
 accelerate==0.27.0
 safetensors==0.4.1
-numpy<2.0  # Add this line to ensure compatibility
-
+numpy==1.24.3
