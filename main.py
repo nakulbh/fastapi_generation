@@ -9,6 +9,9 @@ from io import BytesIO
 import base64
 from typing import Optional
 from fastapi.middleware.cors import CORSMiddleware
+import shutil
+import psutil
+from pathlib import Path
 
 # Set up logging first
 logging.basicConfig(level=logging.INFO)
@@ -34,26 +37,51 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize Stable Diffusion pipeline with more aggressive optimizations
+# Add these functions at the top of your file
+def get_free_space_gb(directory):
+    """Return free space in GB."""
+    stats = shutil.disk_usage(directory)
+    return stats.free / (2**30)  # Convert bytes to GB
+
+def cleanup_cache():
+    """Clean up the HuggingFace cache directory."""
+    cache_dir = Path.home() / ".cache" / "huggingface"
+    if cache_dir.exists():
+        shutil.rmtree(cache_dir, ignore_errors=True)
+    logger.info("Cleaned up HuggingFace cache directory")
+
+# Before initializing the pipeline, check and prepare space
 try:
-    model_id = "CompVis/stable-diffusion-v1-4"  # Smaller model
+    # Set custom cache directory in /tmp or another location with more space
+    cache_dir = "/tmp/huggingface_cache"
+    os.makedirs(cache_dir, exist_ok=True)
+    
+    # Clean up existing cache if space is low
+    if get_free_space_gb(cache_dir) < 10:  # If less than 10GB free
+        cleanup_cache()
+        logger.info("Cleaned up cache due to low disk space")
+    
+    # Initialize pipeline with custom cache directory
+    model_id = "CompVis/stable-diffusion-v1-4"
     logger.info(f"CUDA available: {torch.cuda.is_available()}")
     logger.info(f"Torch version: {torch.__version__}")
     
     pipe = StableDiffusionPipeline.from_pretrained(
         model_id,
-        torch_dtype=torch.float16,  # Use half precision
+        torch_dtype=torch.float16,
         safety_checker=None,
-        requires_safety_checker=False
+        requires_safety_checker=False,
+        cache_dir=cache_dir,  # Use custom cache directory
+        local_files_only=False  # Allow downloading if not in cache
     )
     pipe = pipe.to("cpu")
     
-    # Enable all memory optimizations
-    pipe.enable_attention_slicing(slice_size=1)  # Most aggressive slicing
+    # Enable optimizations
+    pipe.enable_attention_slicing(slice_size=1)
     pipe.enable_vae_slicing()
-    pipe.enable_model_cpu_offload()  # Offload to CPU when possible
+    pipe.enable_model_cpu_offload()
     
-    logger.info("Stable Diffusion pipeline initialized with aggressive optimizations")
+    logger.info("Stable Diffusion pipeline initialized with optimizations")
 except Exception as e:
     logger.error(f"Failed to initialize Stable Diffusion pipeline: {str(e)}")
     raise HTTPException(status_code=500, detail=f"Error initializing Stable Diffusion pipeline: {str(e)}")
@@ -75,6 +103,15 @@ class GenerationResponse(BaseModel):
 async def generate_image(request: GenerationRequest):
     logger.info("Received image generation request.")
     logger.debug(f"Request parameters: {request}")
+
+    # Check available disk space
+    if get_free_space_gb("/tmp") < 1:  # Less than 1GB free
+        cleanup_cache()
+        if get_free_space_gb("/tmp") < 1:
+            raise HTTPException(
+                status_code=507,  # Insufficient Storage
+                detail="Not enough disk space available for image generation"
+            )
 
     # More aggressive parameter limits
     request.num_inference_steps = min(request.num_inference_steps or 20, 20)  # Max 20 steps
