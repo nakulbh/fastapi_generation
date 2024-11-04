@@ -4,11 +4,19 @@ FROM python:3.9-slim
 # Set the working directory
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies including OpenMP
 RUN apt-get update && apt-get install -y \
     build-essential \
     git \
+    libomp-dev \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Set OpenMP environment variables
+ENV OMP_NUM_THREADS=1
+ENV MKL_NUM_THREADS=1
+ENV OPENBLAS_NUM_THREADS=1
+ENV VECLIB_MAXIMUM_THREADS=1
+ENV NUMEXPR_NUM_THREADS=1
 
 # Copy requirements first to leverage Docker cache
 COPY requirements.txt .
@@ -41,7 +49,5 @@ RUN python3 -c "import torch; from diffusers import StableDiffusionPipeline; Sta
 # Expose the port
 EXPOSE 8000
 
-
 # Start Gunicorn with proper logging
 CMD ["gunicorn", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "main:app", "--bind", "0.0.0.0:8000", "--timeout", "300", "--preload"]
-
