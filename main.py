@@ -34,26 +34,26 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize Stable Diffusion pipeline with optimizations
+# Initialize Stable Diffusion pipeline with more aggressive optimizations
 try:
-    model_id = "runwayml/stable-diffusion-v1-5"
+    model_id = "CompVis/stable-diffusion-v1-4"  # Smaller model
     logger.info(f"CUDA available: {torch.cuda.is_available()}")
     logger.info(f"Torch version: {torch.__version__}")
     
     pipe = StableDiffusionPipeline.from_pretrained(
         model_id,
-        torch_dtype=torch.float32,
-        safety_checker=None  # Disable safety checker for speed
+        torch_dtype=torch.float16,  # Use half precision
+        safety_checker=None,
+        requires_safety_checker=False
     )
     pipe = pipe.to("cpu")
     
-    # Enable memory efficient attention
-    pipe.enable_attention_slicing(slice_size="auto")
-    
-    # Optional: Enable VAE slicing for memory efficiency
+    # Enable all memory optimizations
+    pipe.enable_attention_slicing(slice_size=1)  # Most aggressive slicing
     pipe.enable_vae_slicing()
+    pipe.enable_model_cpu_offload()  # Offload to CPU when possible
     
-    logger.info("Stable Diffusion pipeline initialized with optimizations")
+    logger.info("Stable Diffusion pipeline initialized with aggressive optimizations")
 except Exception as e:
     logger.error(f"Failed to initialize Stable Diffusion pipeline: {str(e)}")
     raise HTTPException(status_code=500, detail=f"Error initializing Stable Diffusion pipeline: {str(e)}")
@@ -75,6 +75,14 @@ class GenerationResponse(BaseModel):
 async def generate_image(request: GenerationRequest):
     logger.info("Received image generation request.")
     logger.debug(f"Request parameters: {request}")
+
+    # More aggressive parameter limits
+    request.num_inference_steps = min(request.num_inference_steps or 20, 20)  # Max 20 steps
+    request.width = min(request.width or 384, 384)  # Max 384x384
+    request.height = min(request.height or 384, 384)
+    request.guidance_scale = min(request.guidance_scale or 7.0, 7.0)  # Lower guidance scale
+    
+    logger.info(f"Adjusted parameters: steps={request.num_inference_steps}, size={request.width}x{request.height}")
 
     # Reduce default parameters for faster generation
     if request.num_inference_steps > 30:
