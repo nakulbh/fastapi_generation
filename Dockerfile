@@ -33,7 +33,7 @@ ENV CUDA_VISIBLE_DEVICES=""
 CMD ["gunicorn", "main:app", \
      "--workers", "3", \
      "--worker-class", "uvicorn.workers.UvicornWorker", \
-     "--bind", "0.0.0.0:8000", \
+     "--bind", "0.0.0.0:5000", \
      "--timeout", "300", \
      "--keep-alive", "120", \
      "--worker-tmp-dir", "/dev/shm", \
