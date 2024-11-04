@@ -3,7 +3,7 @@ import os
 import tempfile
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from diffusers import StableDiffusionPipeline
+from diffusers import StableDiffusionPipeline, DiffusionPipeline
 import torch
 from io import BytesIO
 import base64
@@ -117,8 +117,8 @@ try:
         raise RuntimeError(f"Insufficient disk space. Only {free_space:.2f} GB available")
     
     # Initialize pipeline with float32 for CPU - THIS HAPPENS ONCE AT SERVER START
-    model_id = "dreamlike-art/dreamlike-diffusion-1.0"
-    pipe = StableDiffusionPipeline.from_pretrained(
+    model_id = "stabilityai/stable-diffusion-xl-base-1.0"
+    pipe = DiffusionPipeline.from_pretrained(
         model_id,
         torch_dtype=torch.float32,
         use_safetensors=True,
