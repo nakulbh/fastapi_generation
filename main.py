@@ -12,7 +12,10 @@ from fastapi.middleware.cors import CORSMiddleware
 # Add numpy import and check
 try:
     import numpy as np
-except ImportError:
+    logger.info(f"Numpy version: {np.__version__}")
+    logger.info(f"Numpy configuration: {np.show_config()}")
+except ImportError as e:
+    logger.error(f"Numpy import error: {e}")
     raise ImportError("Numpy is required but not installed. Please install it with 'pip install numpy'")
 
 # Set up logging
@@ -33,12 +36,18 @@ app.add_middleware(
 # Initialize Stable Diffusion pipeline
 try:
     model_id = "runwayml/stable-diffusion-v1-5"
+    logger.info(f"CUDA available: {torch.cuda.is_available()}")
+    logger.info(f"Torch version: {torch.__version__}")
     pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=torch.float32)
     pipe = pipe.to("cpu")
+    # Test numpy compatibility
+    test_array = np.zeros((1, 1))
+    logger.info("Numpy test array created successfully")
     logger.info("Stable Diffusion pipeline initialized successfully.")
 except Exception as e:
-    logger.error(f"Failed to initialize Stable Diffusion pipeline: {e}")
-    raise HTTPException(status_code=500, detail="Error initializing Stable Diffusion pipeline")
+    logger.error(f"Failed to initialize Stable Diffusion pipeline: {str(e)}")
+    logger.error(f"Error type: {type(e).__name__}")
+    raise HTTPException(status_code=500, detail=f"Error initializing Stable Diffusion pipeline: {str(e)}")
 
 class GenerationRequest(BaseModel):
     prompt: str
@@ -59,9 +68,13 @@ async def generate_image(request: GenerationRequest):
     logger.debug(f"Request parameters: {request}")
 
     try:
-        # Verify numpy is working
-        if not np.__version__:
-            raise RuntimeError("Numpy is installed but not functioning properly")
+        # More detailed numpy verification
+        try:
+            test_array = np.zeros((1, 1))
+            logger.info("Numpy verification successful")
+        except Exception as e:
+            logger.error(f"Numpy verification failed: {str(e)}")
+            raise RuntimeError(f"Numpy verification failed: {str(e)}")
             
         # Set up generator with the provided seed, if available
         device = "cuda" if torch.cuda.is_available() else "cpu"
