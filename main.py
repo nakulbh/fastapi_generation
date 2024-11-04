@@ -114,21 +114,27 @@ try:
     if free_space < 5:  # Need at least 5GB
         raise RuntimeError(f"Insufficient disk space. Only {free_space:.2f} GB available")
     
-    # Initialize pipeline with minimal footprint
+    # Initialize pipeline with float32 for CPU
     model_id = "CompVis/stable-diffusion-v1-4"
     pipe = StableDiffusionPipeline.from_pretrained(
         model_id,
-        torch_dtype=torch.float16,
+        torch_dtype=torch.float32,  # Use float32 instead of float16
         safety_checker=None,
         requires_safety_checker=False,
         cache_dir=str(cache_dir),
-        local_files_only=False,
-        low_cpu_mem_usage=True
+        local_files_only=False
     )
+
+    # Move to CPU and enable optimizations
     pipe = pipe.to("cpu")
-    pipe.enable_attention_slicing(slice_size=1)
+    pipe.enable_attention_slicing()
     pipe.enable_vae_slicing()
-    
+
+    # Optional: Set lower precision for inputs while keeping model in float32
+    pipe.unet.dtype = torch.float32
+    pipe.vae.dtype = torch.float32
+    pipe.text_encoder.dtype = torch.float32
+
     logger.info("Pipeline initialized successfully")
     
 except Exception as e:
