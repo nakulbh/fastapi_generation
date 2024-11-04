@@ -41,16 +41,7 @@ RUN python3 -c "import torch; from diffusers import StableDiffusionPipeline; Sta
 # Expose the port
 EXPOSE 8000
 
+
 # Start Gunicorn with proper logging
-CMD ["gunicorn", "main:app", \
-     "--workers", "4", \
-     "--worker-class", "uvicorn.workers.UvicornWorker", \
-     "--bind", "0.0.0.0:5000", \
-     "--timeout", "300", \
-     "--worker-tmp-dir", "/dev/shm", \
-     "--log-level", "debug", \
-     "--error-logfile", "/app/logs/error.log", \
-     "--access-logfile", "/app/logs/access.log", \
-     "--capture-output", \
-     "--enable-stdio-inheritance"]
+CMD ["gunicorn", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "main:app", "--bind", "0.0.0.0:8000", "--timeout", "300", "--preload"]
 
