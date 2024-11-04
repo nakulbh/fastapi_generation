@@ -14,6 +14,8 @@ import psutil
 from pathlib import Path
 import subprocess
 import time
+from fastapi.responses import FileResponse
+import uuid
 
 # Set up logging first
 logging.basicConfig(level=logging.INFO)
@@ -154,11 +156,7 @@ class GenerationRequest(BaseModel):
     height: Optional[int] = 512
     seed: Optional[int] = None
 
-class GenerationResponse(BaseModel):
-    image: str  # Base64 encoded image
-    image_path: str  # Local path where image is saved
-
-@app.post("/generate", response_model=GenerationResponse)
+@app.post("/generate")
 async def generate_image(request: GenerationRequest):
     logger.info("Received image generation request.")
     logger.debug(f"Request parameters: {request}")
@@ -211,24 +209,33 @@ async def generate_image(request: GenerationRequest):
             generator=generator
         ).images[0]
 
-        # Save the generated image to a temporary file
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_file_path = os.path.join(temp_dir, "generated_image.png")
+        # Create a unique temporary directory for this request
+        temp_dir = tempfile.mkdtemp()
+        try:
+            # Generate unique filename
+            filename = f"generated_image_{uuid.uuid4()}.png"
+            temp_file_path = os.path.join(temp_dir, filename)
+            
+            # Save the generated image
             image.save(temp_file_path, format="PNG")
             logger.info(f"Image saved to temporary file: {temp_file_path}")
 
-            # Convert PIL Image to base64 string
-            with open(temp_file_path, "rb") as f:
-                img_str = base64.b64encode(f.read()).decode()
-
-            # Determine and log the seed used for generation
+            # Determine the seed used for generation
             used_seed = generator.initial_seed() if generator else torch.seed()
             logger.info(f"Seed used for image generation: {used_seed}")
 
-            return GenerationResponse(
-                image=img_str,
-                image_path=temp_file_path
+            # Return the file response
+            return FileResponse(
+                temp_file_path,
+                media_type="image/png",
+                filename=filename,
+                background=lambda: cleanup_files(temp_dir)  # Clean up after sending
             )
+
+        except Exception as e:
+            # Clean up if something goes wrong
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            raise e
 
     except ValueError as e:
         logger.error(f"ValueError during image generation: {e}")
@@ -244,3 +251,12 @@ async def generate_image(request: GenerationRequest):
 async def health_check():
     logger.info("Health check requested.")
     return {"status": "healthy"}
+
+# Add this helper function
+def cleanup_files(temp_dir: str):
+    """Clean up temporary directory and its contents."""
+    try:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        logger.info(f"Cleaned up temporary directory: {temp_dir}")
+    except Exception as e:
+        logger.error(f"Error cleaning up temporary directory: {e}")
