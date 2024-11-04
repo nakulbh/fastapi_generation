@@ -131,9 +131,9 @@ try:
     pipe.enable_vae_slicing()
 
     # Optional: Set lower precision for inputs while keeping model in float32
-    pipe.unet.dtype = torch.float32
-    pipe.vae.dtype = torch.float32
-    pipe.text_encoder.dtype = torch.float32
+    pipe.unet.to(torch.float32)
+    pipe.vae.to(torch.float32)
+    pipe.text_encoder.to(torch.float32)
 
     logger.info("Pipeline initialized successfully")
     
@@ -162,15 +162,6 @@ class GenerationResponse(BaseModel):
 async def generate_image(request: GenerationRequest):
     logger.info("Received image generation request.")
     logger.debug(f"Request parameters: {request}")
-
-    # Check available disk space
-    if get_free_space_gb("/tmp") < 1:  # Less than 1GB free
-        cleanup_cache()
-        if get_free_space_gb("/tmp") < 1:
-            raise HTTPException(
-                status_code=507,  # Insufficient Storage
-                detail="Not enough disk space available for image generation"
-            )
 
     # More aggressive parameter limits
     request.num_inference_steps = min(request.num_inference_steps or 20, 20)  # Max 20 steps
