@@ -21,8 +21,8 @@ app = FastAPI(title="Text to Image API")
 
 # Initialize Stable Diffusion pipeline
 model_id = "runwayml/stable-diffusion-v1-5"
-pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=torch.float16)
-pipe = pipe.to("cuda" if torch.cuda.is_available() else "cpu")
+pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=torch.float32)
+pipe = pipe.to("cpu")
 
 class GenerationRequest(BaseModel):
     prompt: str
