@@ -117,13 +117,14 @@ try:
         raise RuntimeError(f"Insufficient disk space. Only {free_space:.2f} GB available")
     
     # Initialize pipeline with float32 for CPU - THIS HAPPENS ONCE AT SERVER START
-    model_id = "CompVis/stable-diffusion-v1-4"
+    model_id = "dreamlike-art/dreamlike-diffusion-1.0"
     pipe = StableDiffusionPipeline.from_pretrained(
         model_id,
         torch_dtype=torch.float32,
+        use_safetensors=True,
         safety_checker=None,
         requires_safety_checker=False,
-        cache_dir=str(cache_dir)  # Removed local_files_only=False to allow initial download
+        cache_dir=str(cache_dir)
     )
 
     # Move to CPU and enable optimizations
