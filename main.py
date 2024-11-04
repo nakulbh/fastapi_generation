@@ -93,7 +93,7 @@ def aggressive_cleanup():
             except Exception as e:
                 logger.error(f"Failed to clean {directory}: {e}")
 
-# Before initializing the pipeline, perform cleanup and checks
+# Move pipeline initialization outside of any request handling
 try:
     # Log initial disk space
     get_disk_usage()
@@ -116,15 +116,14 @@ try:
     if free_space < 5:  # Need at least 5GB
         raise RuntimeError(f"Insufficient disk space. Only {free_space:.2f} GB available")
     
-    # Initialize pipeline with float32 for CPU
+    # Initialize pipeline with float32 for CPU - THIS HAPPENS ONCE AT SERVER START
     model_id = "CompVis/stable-diffusion-v1-4"
     pipe = StableDiffusionPipeline.from_pretrained(
         model_id,
-        torch_dtype=torch.float32,  # Use float32 instead of float16
+        torch_dtype=torch.float32,
         safety_checker=None,
         requires_safety_checker=False,
-        cache_dir=str(cache_dir),
-        local_files_only=False
+        cache_dir=str(cache_dir)  # Removed local_files_only=False to allow initial download
     )
 
     # Move to CPU and enable optimizations
@@ -142,15 +141,12 @@ try:
 except Exception as e:
     logger.error(f"Failed to initialize pipeline: {e}")
     get_disk_usage()  # Log final disk space state
-    raise HTTPException(
-        status_code=500,
-        detail=f"Failed to initialize pipeline due to disk space issues. Please contact administrator."
-    )
+    raise RuntimeError(f"Failed to initialize pipeline: {e}")
 
 class GenerationRequest(BaseModel):
     prompt: str
     negative_prompt: Optional[str] = None
-    num_inference_steps: Optional[int] = 50
+    num_inference_steps: Optional[int] = 20
     guidance_scale: Optional[float] = 7.5
     width: Optional[int] = 512
     height: Optional[int] = 512
