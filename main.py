@@ -9,6 +9,7 @@ import uuid
 import logging
 from typing import Optional
 import gc
+import psutil
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -30,13 +31,14 @@ os.environ["TORCH_CPU_ALLOCATOR"] = "native"  # Use native memory allocator
 
 # Initialize the model with minimal memory footprint
 try:
+    # Use a model optimized for CPU, replace if necessary
     pipe = StableDiffusionPipeline.from_pretrained(
-        "CompVis/stable-diffusion-v1-4",  # Smaller model
+        "stabilityai/stable-diffusion-2-1",  # Lighter model for CPU
         torch_dtype=torch.float32,
         low_cpu_mem_usage=True,
     )
     
-    # Memory optimizations
+    # Move the model to CPU
     pipe = pipe.to("cpu")
     pipe.enable_attention_slicing(1)
     pipe.enable_vae_slicing()
@@ -44,8 +46,8 @@ try:
     
     # Clear memory after model load
     gc.collect()
-    torch.cuda.empty_cache()
-        
+    torch.cuda.empty_cache()  # Not applicable here but kept for compatibility
+    
     logger.info("Model loaded successfully")
 except Exception as e:
     logger.error(f"Failed to load model: {e}")
@@ -54,10 +56,10 @@ except Exception as e:
 class ImageRequest(BaseModel):
     prompt: str
     negative_prompt: Optional[str] = None
-    num_inference_steps: Optional[int] = 15  # Reduced steps
+    num_inference_steps: Optional[int] = 25  # Increased steps for better quality
     guidance_scale: Optional[float] = 7.5
-    width: Optional[int] = 384  # Reduced size
-    height: Optional[int] = 384  # Reduced size
+    width: Optional[int] = 512  # Increased size for better resolution
+    height: Optional[int] = 512  # Increased size for better resolution
     seed: Optional[int] = None
 
 @app.post("/generate")
@@ -92,7 +94,6 @@ async def generate_image(request: ImageRequest):
         # Clear memory
         del result
         gc.collect()
-        torch.cuda.empty_cache()
         
         return FileResponse(
             path=temp_file,
@@ -119,7 +120,6 @@ def cleanup_file(file_path: str):
 @app.get("/memory")
 async def memory_status():
     """Endpoint to check memory usage"""
-    import psutil
     process = psutil.Process()
     memory_info = process.memory_info()
     return {
