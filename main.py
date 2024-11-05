@@ -29,9 +29,9 @@ app.add_middleware(
 torch.set_num_threads(4)  # Limit CPU threads
 os.environ["TORCH_CPU_ALLOCATOR"] = "native"  # Use native memory allocator
 
-# Initialize the model with minimal memory footprint
+# Initialize the model
 try:
-    # Use a model optimized for CPU, replace if necessary
+    # Use a model optimized for CPU
     pipe = StableDiffusionPipeline.from_pretrained(
         "stabilityai/stable-diffusion-2-1",  # Lighter model for CPU
         torch_dtype=torch.float32,
@@ -46,7 +46,6 @@ try:
     
     # Clear memory after model load
     gc.collect()
-    torch.cuda.empty_cache()  # Not applicable here but kept for compatibility
     
     logger.info("Model loaded successfully")
 except Exception as e:
