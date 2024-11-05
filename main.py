@@ -1,12 +1,14 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from diffusers import DiffusionPipeline
+from diffusers import StableDiffusionPipeline
 import torch
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 import os
 import uuid
 import logging
+from typing import Optional
+import gc
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -22,46 +24,114 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize the model
-pipe = DiffusionPipeline.from_pretrained(
-    "stabilityai/stable-diffusion-xl-base-1.0",
-    torch_dtype=torch.float32,
-    safety_checker=None,
-    requires_safety_checker=False
-)
-pipe = pipe.to("cpu")
+# Configure PyTorch for CPU
+torch.set_num_threads(4)  # Limit CPU threads
+os.environ["TORCH_CPU_ALLOCATOR"] = "native"  # Use native memory allocator
+
+# Initialize the model with minimal memory footprint
+try:
+    pipe = StableDiffusionPipeline.from_pretrained(
+        "CompVis/stable-diffusion-v1-4",  # Smaller model
+        torch_dtype=torch.float32,
+        low_cpu_mem_usage=True,
+    )
+    
+    # Memory optimizations
+    pipe = pipe.to("cpu")
+    pipe.enable_attention_slicing(1)
+    pipe.enable_vae_slicing()
+    pipe.enable_sequential_cpu_offload()  # Enable CPU offloading
+    
+    # Clear memory after model load
+    gc.collect()
+    torch.cuda.empty_cache()
+        
+    logger.info("Model loaded successfully")
+except Exception as e:
+    logger.error(f"Failed to load model: {e}")
+    raise
 
 class ImageRequest(BaseModel):
     prompt: str
-    width: int = 512
-    height: int = 512
+    negative_prompt: Optional[str] = None
+    num_inference_steps: Optional[int] = 15  # Reduced steps
+    guidance_scale: Optional[float] = 7.5
+    width: Optional[int] = 384  # Reduced size
+    height: Optional[int] = 384  # Reduced size
+    seed: Optional[int] = None
 
 @app.post("/generate")
 async def generate_image(request: ImageRequest):
     try:
-        # Generate image
-        result = pipe(
-            prompt=request.prompt,
-            width=request.width,
-            height=request.height,
-        )
+        logger.info(f"Starting image generation for prompt: {request.prompt}")
         
+        # Set random seed if provided
+        if request.seed is not None:
+            torch.manual_seed(request.seed)
+        
+        # Force garbage collection before generation
+        gc.collect()
+        
+        # Generate image with memory optimizations
+        with torch.no_grad(), torch.inference_mode():
+            result = pipe(
+                prompt=request.prompt,
+                negative_prompt=request.negative_prompt,
+                num_inference_steps=request.num_inference_steps,
+                guidance_scale=request.guidance_scale,
+                width=request.width,
+                height=request.height,
+            )
+
         # Save image to temporary file
         temp_file = f"/tmp/generated_image_{uuid.uuid4()}.png"
         result.images[0].save(temp_file, format="PNG")
         
-        # Return the image file
+        logger.info("Image generated successfully")
+        
+        # Clear memory
+        del result
+        gc.collect()
+        torch.cuda.empty_cache()
+        
         return FileResponse(
             path=temp_file,
             media_type="image/png",
             filename="generated_image.png",
-            background=lambda: os.remove(temp_file)  # Clean up after sending
+            background=lambda: cleanup_file(temp_file)
         )
 
     except Exception as e:
         logger.error(f"Error generating image: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Failed to generate image: {str(e)}"
+        )
+
+def cleanup_file(file_path: str):
+    try:
+        if os.path.exists(file_path):
+            os.remove(file_path)
+            logger.info(f"Cleaned up temporary file: {file_path}")
+    except Exception as e:
+        logger.error(f"Failed to cleanup file {file_path}: {e}")
+
+@app.get("/memory")
+async def memory_status():
+    """Endpoint to check memory usage"""
+    import psutil
+    process = psutil.Process()
+    memory_info = process.memory_info()
+    return {
+        "memory_used_mb": memory_info.rss / 1024 / 1024,
+        "memory_percent": process.memory_percent(),
+        "system_memory": dict(psutil.virtual_memory()._asdict())
+    }
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy"}
+    return {
+        "status": "healthy",
+        "model_loaded": pipe is not None,
+        "torch_threads": torch.get_num_threads()
+    }
