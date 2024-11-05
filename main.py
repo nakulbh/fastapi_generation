@@ -25,7 +25,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Configure PyTorch for CPU
+# Configure PyTorch for CPU only
 torch.set_num_threads(4)  # Limit CPU threads
 os.environ["TORCH_CPU_ALLOCATOR"] = "native"  # Use native memory allocator
 
@@ -33,13 +33,15 @@ os.environ["TORCH_CPU_ALLOCATOR"] = "native"  # Use native memory allocator
 try:
     # Use a model optimized for CPU
     pipe = StableDiffusionPipeline.from_pretrained(
-        "stabilityai/stable-diffusion-2-1",  # Lighter model for CPU
+        "stabilityai/stable-diffusion-2-1",  # Choose a lighter model if needed
         torch_dtype=torch.float32,
         low_cpu_mem_usage=True,
     )
     
-    # Move the model to CPU
+    # Ensure the model is moved to CPU
     pipe = pipe.to("cpu")
+    
+    # Enable optimizations
     pipe.enable_attention_slicing(1)
     pipe.enable_vae_slicing()
     pipe.enable_sequential_cpu_offload()  # Enable CPU offloading
@@ -57,8 +59,8 @@ class ImageRequest(BaseModel):
     negative_prompt: Optional[str] = None
     num_inference_steps: Optional[int] = 25  # Increased steps for better quality
     guidance_scale: Optional[float] = 7.5
-    width: Optional[int] = 512  # Increased size for better resolution
-    height: Optional[int] = 512  # Increased size for better resolution
+    width: Optional[int] = 512  # Adjusted size for better resolution
+    height: Optional[int] = 512  # Adjusted size for better resolution
     seed: Optional[int] = None
 
 @app.post("/generate")
