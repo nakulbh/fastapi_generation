@@ -18,18 +18,11 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # AWS S3 Configuration
-S3_BUCKET = os.getenv('S3_BUCKET_NAME')
-AWS_ACCESS_KEY = os.getenv('AWS_ACCESS_KEY_ID')
-AWS_SECRET_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
-AWS_REGION = os.getenv('AWS_REGION', 'us-east-1')
+S3_BUCKET = os.getenv('text-to-image-api')
+AWS_REGION = os.getenv('AWS_REGION', 'ap-south-1')
 
-# Initialize S3 client
-s3_client = boto3.client(
-    's3',
-    aws_access_key_id=AWS_ACCESS_KEY,
-    aws_secret_access_key=AWS_SECRET_KEY,
-    region_name=AWS_REGION
-)
+# Initialize S3 client with no explicit credentials; boto3 will use the IAM role's temporary credentials
+s3_client = boto3.client('s3', region_name=AWS_REGION)
 
 app = FastAPI(title="Text to Image API")
 
@@ -160,9 +153,17 @@ async def memory_status():
 @app.get("/health")
 async def health_check():
     """Health check endpoint to verify model and server status."""
+    try:
+        # Test S3 access by listing buckets
+        s3_client.head_bucket(Bucket=S3_BUCKET)
+        s3_status = "connected"
+    except Exception as e:
+        s3_status = f"error: {str(e)}"
+
     return {
         "status": "healthy",
         "model_loaded": pipe is not None,
         "torch_threads": torch.get_num_threads(),
-        "s3_configured": all([AWS_ACCESS_KEY, AWS_SECRET_KEY, S3_BUCKET])
+        "s3_status": s3_status,
+        "s3_bucket": S3_BUCKET
     }
