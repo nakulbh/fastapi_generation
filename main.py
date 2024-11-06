@@ -9,11 +9,27 @@ import uuid
 import logging
 import gc
 import psutil
+import boto3
 from typing import Optional
+from botocore.exceptions import ClientError
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# AWS S3 Configuration
+S3_BUCKET = os.getenv('S3_BUCKET_NAME')
+AWS_ACCESS_KEY = os.getenv('AWS_ACCESS_KEY_ID')
+AWS_SECRET_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
+AWS_REGION = os.getenv('AWS_REGION', 'us-east-1')
+
+# Initialize S3 client
+s3_client = boto3.client(
+    's3',
+    aws_access_key_id=AWS_ACCESS_KEY,
+    aws_secret_access_key=AWS_SECRET_KEY,
+    region_name=AWS_REGION
+)
 
 app = FastAPI(title="Text to Image API")
 
@@ -52,11 +68,27 @@ except Exception as e:
 class ImageRequest(BaseModel):
     prompt: str
     negative_prompt: Optional[str] = None
-    num_inference_steps: Optional[int] = 25  # Increased steps for better quality
+    num_inference_steps: Optional[int] = 20  # Changed to 20 as requested
     guidance_scale: Optional[float] = 7.5
-    width: Optional[int] = 512  # Adjusted size for better resolution
-    height: Optional[int] = 512  # Adjusted size for better resolution
+    width: Optional[int] = 512
+    height: Optional[int] = 512
     seed: Optional[int] = None
+
+def upload_to_s3(file_path: str, object_name: str) -> str:
+    """
+    Upload a file to S3 bucket and return the URL
+    """
+    try:
+        s3_client.upload_file(file_path, S3_BUCKET, object_name)
+        url = f"https://{S3_BUCKET}.s3.{AWS_REGION}.amazonaws.com/{object_name}"
+        logger.info(f"Successfully uploaded image to S3: {url}")
+        return url
+    except ClientError as e:
+        logger.error(f"Failed to upload to S3: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to upload image to S3: {str(e)}"
+        )
 
 @app.post("/generate")
 async def generate_image(request: ImageRequest):
@@ -80,18 +112,24 @@ async def generate_image(request: ImageRequest):
                 height=request.height,
             )
 
+        # Generate unique filename
+        filename = f"generated_image_{uuid.uuid4()}.png"
+        temp_file = f"/tmp/{filename}"
+        
         # Save image to temporary file
-        temp_file = f"/tmp/generated_image_{uuid.uuid4()}.png"
         result.images[0].save(temp_file, format="PNG")
 
-        logger.info("Image generated successfully")
+        # Upload to S3
+        s3_url = upload_to_s3(temp_file, filename)
 
-        return FileResponse(
-            path=temp_file,
-            media_type="image/png",
-            filename="generated_image.png",
-            background=lambda: cleanup_file(temp_file)
-        )
+        logger.info("Image generated and uploaded successfully")
+
+        # Cleanup temporary file
+        cleanup_file(temp_file)
+
+        # Return the S3 URL instead of the file
+        return {"status": "success", "image_url": s3_url}
+
     except Exception as e:
         logger.error(f"Error generating image: {str(e)}")
         raise HTTPException(
@@ -125,5 +163,6 @@ async def health_check():
     return {
         "status": "healthy",
         "model_loaded": pipe is not None,
-        "torch_threads": torch.get_num_threads()
+        "torch_threads": torch.get_num_threads(),
+        "s3_configured": all([AWS_ACCESS_KEY, AWS_SECRET_KEY, S3_BUCKET])
     }
